@@ -5,7 +5,6 @@
 #include <string.h>
 #include "telnet.h"
 
-#define CRLF "\x0d\x0a"
 #define AYT 246
 #define GA 249
 #define WILL 251
@@ -30,16 +29,15 @@ Telnet::Telnet(int socket)
 
 int Telnet::sendGA()
 {
-    char msg[3];
+    char msg[2];
     msg[0] = IAC;
     msg[1] = GA;
-    msg[2] = '\0';
 
     pthread_mutex_lock(&(this->writeMutex));
-    int nBytes = write(this->socketDescriptor, msg, 3);
+    int nBytes = write(this->socketDescriptor, msg, 2);
     pthread_mutex_unlock(&(this->writeMutex));
 
-    if (nBytes < 3)
+    if (nBytes < 2)
     {
         if (nBytes == 0)
             this->error = ERR_SOCK_CLOSED;
@@ -53,25 +51,31 @@ int Telnet::sendGA()
 
 int Telnet::respond(unsigned char command, unsigned char option)
 {
-    char response[4] = "\x00\x00\x00";
-    int resLen = 4;
+    char response[3] = "\x00\x00";
+    int resLen = 3;
     response[0] = IAC;
 
     switch (command)
     {
         case AYT:
-            strcpy(response, "...");
-            break;
+        {
+            string resp("eftp telenet");
+            return this->writeLine(&resp);
+        }
         case WILL:
         case WONT:
+        {
             response[1] = DONT;
             response[2] = option;
             break;
+        }
         case DO:
         case DONT:
+        {
             response[1] = WONT;
             response[2] = option;
             break;
+        }
         default:
             assert(false);
     }
@@ -99,6 +103,7 @@ int Telnet::readLine(string* line)
     unsigned char newChar;
     bool interpretCommand = false;
     bool interpretOption = false;
+    bool subnegotiation = false;
     bool cr = false;
     unsigned char command = 0;
 
@@ -119,89 +124,96 @@ int Telnet::readLine(string* line)
         //     cout << "Received: " << (int) newChar << "\n";
         // #endif
 
-        if (newChar == IAC and !interpretCommand)
+        if (interpretOption)   // interpret this byte as option
+        {
+            #ifdef DEBUG
+                cout << "request ";
+                switch (command)
+                {
+                    case WILL:
+                    cout << "WILL "; break;
+                    case WONT:
+                    cout << "WON'T "; break;
+                    case DO:
+                    cout << "DO "; break;
+                    case DONT:
+                    cout << "DON'T"; break;
+                }
+                cout << (int) newChar << "\n";
+            #endif
+            // send negative response
+            int result = this->respond(command, newChar);
+            if (result)
+                return 1;
+            interpretOption = false;
+        }
+        else if (newChar == IAC and !interpretCommand)
         // interpret next byte as command
         {
             interpretCommand = true;
         }
-        else
+        else if (interpretCommand and newChar != IAC)
+        // interpret this byte as command
         {
-            if (interpretCommand and newChar != IAC)
-            // interpret this byte as command
+            interpretCommand = false;
+            command = newChar;
+            #ifdef DEBUG
+                cout << "Command: " << (int) command << "\n";
+            #endif
+
+            // TODO respond to SB, SE commands
+
+            if (command == WILL or command == WONT or
+                command == DO or command == DONT)
             {
-                command = newChar;
-                #ifdef DEBUG
-                    cout << "Command: " << (int) command << "\n";
-                #endif
-
-                // TODO respond to SB, SE commands
-
-                if (command == WILL or command == WONT or
-                    command == DO or command == DONT)
-                {
-                    interpretOption = true;
-                }
-                else if (command == 248)    // erase line
-                {
-                    line->clear();
-                }
-                else if (command == 247 and line->length() > 0)
-                {
-                    // erase character
-                    line->erase(line->length() - 1, 1);
-                }
-                else if (command == AYT)    // Are you there?
-                {
-                    int result = this->respond(command, (unsigned char) 0);
-                    if (result)
-                        return 1;
-                }
-                else if (command < 240)
-                {
-                    this->error = ERR_COMMAND;
-                    return 1;
-                }
-                interpretCommand = false;
+                interpretOption = true;
             }
-            else if (interpretOption)   // interpret this byte as option
+            else if (command == 248)    // erase line
             {
-                #ifdef DEBUG
-                    cout << "request ";
-                    switch (command)
-                    {
-                        case WILL:
-                        cout << "WILL "; break;
-                        case WONT:
-                        cout << "WON'T "; break;
-                        case DO:
-                        cout << "DO "; break;
-                        case DONT:
-                        cout << "DON'T"; break;
-                    }
-                    cout << (int) newChar << "\n";
-                #endif
-                // send negative response
-                int result = this->respond(command, newChar);
+                line->clear();
+            }
+            else if (command == 247 and line->length() > 0)
+            {
+                // erase character
+                line->erase(line->length() - 1, 1);
+            }
+            else if (command == AYT)    // Are you there?
+            {
+                int result = this->respond(command, (unsigned char) 0);
                 if (result)
                     return 1;
-                interpretOption = false;
             }
-            else    // regular character
+            else if (command == 250)
             {
-                (*line) += newChar;
-                // #ifdef DEBUG
-                //     cout << "So far: " << *line << "\n";
-                // #endif
-
-                if (cr and newChar == 10)   // CR LF
-                {
-                    // #ifdef DEBUG
-                    //     cout << "EOL\n";
-                    // #endif
-                    return 0;
-                }
-                cr = (newChar == 13);       // CR
+                subnegotiation = true;
             }
+            else if (command == 240)
+            {
+                subnegotiation = false;
+            }
+            else if (command < 240)
+            {
+                this->error = ERR_COMMAND;
+                return 1;
+            }
+        }
+        else    // regular character
+        {
+            interpretCommand = false;
+            if (newChar != '\0' and !subnegotiation)
+                (*line) += newChar;
+            // #ifdef DEBUG
+            //     cout << "So far: " << *line << "\n";
+            // #endif
+
+            if (cr and newChar == '\n')   // CR LF
+            {
+                // #ifdef DEBUG
+                //     cout << "EOL\n";
+                // #endif
+                return 0;
+            }
+            cr = (newChar == '\r');       // CR
         }
     }
 }
@@ -211,12 +223,11 @@ int Telnet::writeLine(string* line)
 // append CR LF to line and write to connected socket
 {
     int lineLen = line->length();
-    int finalLen = lineLen + 3;
+    int finalLen = lineLen + 2;
     char chLine[finalLen];
     strcpy(chLine, line->c_str());
-    chLine[finalLen-3] = 13;      // CR
-    chLine[finalLen-2] = 10;      // LF
-    chLine[finalLen-1] = '\0';
+    chLine[finalLen-2] = '\r';      // CR
+    chLine[finalLen-1] = '\n';      // LF
 
     pthread_mutex_lock(&(this->writeMutex));
     #ifdef DEBUG
