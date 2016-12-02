@@ -7,6 +7,9 @@
 #include "manager.h"
 using namespace std;
 
+list<ControlConnection*> ControlConnection::List = list<ControlConnection*>();
+pthread_mutex_t ControlConnection::listMutex = PTHREAD_MUTEX_INITIALIZER;
+
 enum Commands
 {
     USER, QUIT, PORT, TYPE, MODE, STRU,
@@ -62,48 +65,85 @@ Command* parseLine(string* line)
     return nullptr;
 }
 
-ControlConnection::ControlConnection(int socketDescriptor)
-    : socket(socketDescriptor), telnet(socketDescriptor) {}
+void* run(void* cc_p)
+{
+    ControlConnection* cc = (ControlConnection*)cc_p;
+    cc->Run();
+    return 0;
+}
 
-void* ControlConnection::Run(void* arg)
+ControlConnection::ControlConnection(int socketDescriptor)
+    : socket(socketDescriptor), telnet(socketDescriptor)
+{
+    pthread_mutex_lock(&listMutex);
+    List.push_back(this);
+    listIterator = prev(List.end());
+    pthread_mutex_unlock(&listMutex);
+}
+
+void ControlConnection::Run()
 {
     while(1)
     {
-        string line;
-        telnet.readLine(&line);
+        try
+        {
+            string line;
+            telnet.readLine(&line);
 
-        Command* command = parseLine(&line);
-        if (command == nullptr)
-        {
-            cout << "Received invalid command: ";
-            cout << line;
-            string response("Invalid command: ");
-            response += line;
-            telnet.writeLine(&response);
+            Command* command = parseLine(&line);
+            if (command == nullptr)
+            {
+                cout << "Received invalid command: ";
+                cout << line;
+                string response("Invalid command: ");
+                response += line;
+                telnet.writeLine(&response);
+            }
+            else
+            {
+                cout << "FTP command: ";
+                cout << CommandStrings[command->type] << "\n";
+                cout << "Arguments: ";
+                for (int j = 0; j<command->argc; j++)
+                {
+                    cout << command->args[j];
+                    if (j != (command->argc)-1)
+                        cout << ", ";
+                }
+                cout << "\n";
+                if (command->type == QUIT)
+                {
+                    break;
+                }
+                delete[] command->args;
+                delete command;
+            }
         }
-        else
+        catch (SocketClosedError& e)
         {
-            cout << "FTP command: ";
-            cout << CommandStrings[command->type] << "\n";
-            cout << "Arguments: ";
-            for (int j = 0; j<command->argc; j++)
-            {
-                cout << command->args[j];
-                if (j != (command->argc)-1)
-                    cout << ", ";
-            }
-            cout << "\n";
-            if (command->type == QUIT)
-            {
-                return NULL;
-            }
-            delete[] command->args;
-            delete command;
+            cout << "Socket closed by other party\n";
+            break;
+        }
+        catch (SocketError& e)
+        {
+            cerr << "Network error " << e.code() << e.what() << "\n";
+            break;
         }
     }
+    delete this;
 }
 
 ControlConnection::~ControlConnection()
 {
-    close(this->socket);
+    pthread_mutex_lock(&listMutex);
+    List.erase(listIterator);
+    // List.remove(this);
+    pthread_mutex_unlock(&listMutex);
+
+    int closeResult;
+    closeResult = close(socket);
+    if (closeResult)
+    {
+        cerr << "Błąd podczas zamykania połączenia\n";
+    }
 }
