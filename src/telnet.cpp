@@ -4,6 +4,7 @@
 #include <cassert>
 #include <string.h>
 #include "telnet.h"
+#include "net.h"
 
 #define AYT 246
 #define GA 249
@@ -21,13 +22,13 @@ using namespace std;
 
 
 Telnet::Telnet(int socket)
-: socketDescriptor(socket), error(0)
+: socketDescriptor(socket)
 {
     writeMutex = PTHREAD_MUTEX_INITIALIZER;
 }
 
 
-int Telnet::sendGA()
+void Telnet::sendGA()
 {
     char msg[2];
     msg[0] = IAC;
@@ -40,16 +41,14 @@ int Telnet::sendGA()
     if (nBytes < 2)
     {
         if (nBytes == 0)
-            this->error = ERR_SOCK_CLOSED;
+            throw SocketClosedError();
         if (nBytes == -1)
-            this->error = ERR_IO;
-        return 1;
+            throw SocketError("Error while sending GA");
     }
-    return 0;
 }
 
 
-int Telnet::respond(unsigned char command, unsigned char option)
+void Telnet::respond(unsigned char command, unsigned char option)
 {
     char response[3] = "\x00\x00";
     int resLen = 3;
@@ -60,7 +59,8 @@ int Telnet::respond(unsigned char command, unsigned char option)
         case AYT:
         {
             string resp("eftp telenet");
-            return this->writeLine(&resp);
+            this->writeLine(&resp);
+            return;
         }
         case WILL:
         case WONT:
@@ -87,16 +87,14 @@ int Telnet::respond(unsigned char command, unsigned char option)
     if (nBytes < resLen)
     {
         if (nBytes == 0)
-            this->error = ERR_SOCK_CLOSED;
+            throw SocketClosedError();
         if (nBytes == -1)
-            this->error = ERR_IO;
-        return 1;
+            throw SocketError("Error while sending Telnet response");
     }
-    return 0;
 }
 
 
-int Telnet::readLine(string* line)
+void Telnet::readLine(string* line)
 // read exactly one line
 {
     line->clear();
@@ -112,13 +110,11 @@ int Telnet::readLine(string* line)
         int nBytes = read(this->socketDescriptor, &newChar, 1);
         if (nBytes == 0)
         {
-            this->error = ERR_SOCK_CLOSED;
-            return 1;
+            throw SocketClosedError();
         }
         if (nBytes == -1)
         {
-            this->error = ERR_IO;
-            return 1;
+            throw SocketError("Error while reading from control connection");
         }
         // #ifdef DEBUG
         //     cout << "Received: " << (int) newChar << "\n";
@@ -142,9 +138,7 @@ int Telnet::readLine(string* line)
                 cout << (int) newChar << "\n";
             #endif
             // send negative response
-            int result = this->respond(command, newChar);
-            if (result)
-                return 1;
+            this->respond(command, newChar);
             interpretOption = false;
         }
         else if (newChar == IAC and !interpretCommand)
@@ -160,8 +154,6 @@ int Telnet::readLine(string* line)
             #ifdef DEBUG
                 cout << "Command: " << (int) command << "\n";
             #endif
-
-            // TODO respond to SB, SE commands
 
             if (command == WILL or command == WONT or
                 command == DO or command == DONT)
@@ -179,9 +171,7 @@ int Telnet::readLine(string* line)
             }
             else if (command == AYT)    // Are you there?
             {
-                int result = this->respond(command, (unsigned char) 0);
-                if (result)
-                    return 1;
+                this->respond(command, (unsigned char) 0);
             }
             else if (command == 250)
             {
@@ -193,8 +183,9 @@ int Telnet::readLine(string* line)
             }
             else if (command < 240)
             {
-                this->error = ERR_COMMAND;
-                return 1;
+                char errMsg[50];
+                sprintf(errMsg, "Invalid telnet command: %d", command);
+                throw CommandError(errMsg);
             }
         }
         else    // regular character
@@ -211,7 +202,7 @@ int Telnet::readLine(string* line)
                 // #ifdef DEBUG
                 //     cout << "EOL\n";
                 // #endif
-                return 0;
+                return;
             }
             cr = (newChar == '\r');       // CR
         }
@@ -219,15 +210,21 @@ int Telnet::readLine(string* line)
 }
 
 
-int Telnet::writeLine(string* line)
+void Telnet::writeLine(string* line)
 // append CR LF to line and write to connected socket
 {
     int lineLen = line->length();
-    int finalLen = lineLen + 2;
-    char chLine[finalLen];
+    int finalLen = lineLen;
+    char chLine[lineLen+2];
+    assert(line->find("\r\n") >= lineLen-2);    // no extra lines
+    //if (line->find("\r\n") == string::npos)
+    if (not ((*line)[lineLen-2] == '\r' and (*line)[lineLen-1] == '\n'))
+    {
+        finalLen += 2;
+        chLine[finalLen-2] = '\r';      // CR
+        chLine[finalLen-1] = '\n';      // LF
+    }
     strcpy(chLine, line->c_str());
-    chLine[finalLen-2] = '\r';      // CR
-    chLine[finalLen-1] = '\n';      // LF
 
     pthread_mutex_lock(&(this->writeMutex));
     #ifdef DEBUG
@@ -241,10 +238,8 @@ int Telnet::writeLine(string* line)
     if (nBytes != finalLen)
     {
         if (nBytes == 0)
-            this->error = ERR_SOCK_CLOSED;
+            throw SocketClosedError();
         if (nBytes == -1)
-            this->error = ERR_IO;
-        return 1;
+            throw SocketError("Error while writing to control connection");
     }
-    return 0;
 }
