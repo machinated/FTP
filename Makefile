@@ -1,6 +1,6 @@
 #### PROJECT SETTINGS ####
 # The name of the executable to be created
-BIN_NAME := eftp_test
+BIN_NAME := eftp
 # Compiler used
 CXX ?= g++
 # Extension of source files used in the project

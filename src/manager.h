@@ -5,7 +5,7 @@
 #include <list>
 #include "telnet.h"
 
-void* run(void* CC_pointer);
+void* runCC(void* CC_pointer);
 
 class ControlConnection
 {
@@ -13,6 +13,7 @@ class ControlConnection
     int socket;
     Telnet telnet;
     string username;
+    string peerAddrStr;
 public:
     pthread_t thread;
     static std::list<ControlConnection*> List;

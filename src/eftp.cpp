@@ -11,6 +11,7 @@
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
+#include <signal.h>
 #include <string>
 #include <iostream>
 
@@ -19,9 +20,10 @@
 
 
 #define QUEUE_SIZE 5
+const char helpMsg[] = "USAGE: eftp PORT\n";
 int serverSocket = -1;
 
-void clean()
+void cleanup()
 {
     for (list<ControlConnection*>::iterator
          iter = ControlConnection::List.begin();
@@ -35,26 +37,45 @@ void clean()
         int closeResult = close(serverSocket);
         if (closeResult)
         {
-            cerr << "Błąd podczas zamykania gniazda\n";
+            cerr << "Failed to close server socket.\n";
         }
     }
 }
 
+void signalHandler(int)
+{
+    cleanup();
+}
+
 int main(int argc, char const *argv[])
 {
-    int atexitResult = atexit(clean);
+    int atexitResult = atexit(cleanup);
     if (atexitResult)
     {
-        cerr << "Błąd rejestracji procedury atexit.\n";
+        cerr << "Failed to register 'atexit' function.\n";
         exit(1);
     }
 
+    // sighandler_t signalResult = signal(SIGINT, &signalHandler);
+    // if (signalResult == SIG_ERR)
+    // {
+    //     cerr << "Failed to register signal handler.\n";
+    //     exit(1);
+    // }
+
     if (argc != 2)
     {
-        cerr << "Podaj dokładnie jeden argument: numer portu.\n";
+        cerr << helpMsg;
         exit(1);
     }
-    int port = atoi(argv[1]);
+    char* endPointer;
+    int port = strtol(argv[1], &endPointer, 10);
+    if (*endPointer != '\0')    // non-digit characters in argument
+    {
+        cerr << "Cannot interpret " << argv[1] << " as port number.\n";
+        cerr << helpMsg;
+        exit(1);
+    }
 
     try
     {
@@ -71,17 +92,17 @@ int main(int argc, char const *argv[])
         int connectionDesc = accept(serverSocket, NULL, NULL);
         if (connectionDesc < 0)
         {
-            cerr << " Błąd przy próbie utworzenia gniazda dla połączenia.\n";
+            cerr << "Fatal: cannot create connection socket\n";
             exit(1);
         }
 
         ControlConnection* cc = new ControlConnection(connectionDesc);
 
         int createResult;
-        createResult = pthread_create(&(cc->thread), NULL, &run, (void*)cc);
+        createResult = pthread_create(&(cc->thread), NULL, &runCC, (void*)cc);
         if (createResult)
         {
-            cerr << "Błąd przy próbie utworzenia wątku.\n";
+            cerr << "Failed to start new thread.\n";
             exit(1);
         }
     }

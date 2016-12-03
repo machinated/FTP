@@ -1,7 +1,16 @@
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <signal.h>
+
 #include <string>
 #include <regex>
 #include <iostream>
 #include <unistd.h>
+#include <sys/socket.h>
 #include "net.h"
 #include "telnet.h"
 #include "manager.h"
@@ -65,7 +74,7 @@ Command* parseLine(string* line)
     return nullptr;
 }
 
-void* run(void* cc_p)
+void* runCC(void* cc_p)
 {
     ControlConnection* cc = (ControlConnection*)cc_p;
     cc->Run();
@@ -79,11 +88,29 @@ ControlConnection::ControlConnection(int socketDescriptor)
     List.push_back(this);
     listIterator = prev(List.end());
     pthread_mutex_unlock(&listMutex);
+
+    struct sockaddr_in addr;
+    unsigned int len = sizeof(addr);
+    getpeername(socket, (struct sockaddr*) &addr, &len);
+    char tempBuf[16];
+    inet_ntop(AF_INET, (const void*) &(addr.sin_addr), tempBuf, 16);
+    if (tempBuf == nullptr)
+    {
+        cerr << "Error converting client address to string.\n";
+        exit(1);
+    }
+    peerAddrStr = string(tempBuf) + string(":")
+                    + to_string((unsigned short) addr.sin_port);
+    #ifdef DEBUG
+        cout << "Initialized connection with client: " << peerAddrStr << "\n";
+    #endif
 }
 
 void ControlConnection::Run()
 {
-    while(1)
+    bool run = true;
+
+    while(run)
     {
         try
         {
@@ -113,8 +140,9 @@ void ControlConnection::Run()
                 cout << "\n";
                 if (command->type == QUIT)
                 {
-                    break;
+                    run = false;
                 }
+
                 delete[] command->args;
                 delete command;
             }
@@ -144,6 +172,9 @@ ControlConnection::~ControlConnection()
     closeResult = close(socket);
     if (closeResult)
     {
-        cerr << "Błąd podczas zamykania połączenia\n";
+        cerr << "Error while closing connection\n";
     }
+    #ifdef DEBUG
+        cout << "Terminated connection with client: " << peerAddrStr << "\n";
+    #endif
 }
