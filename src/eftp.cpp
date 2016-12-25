@@ -20,8 +20,10 @@
 
 
 #define QUEUE_SIZE 5
-const char helpMsg[] = "USAGE: eftp PORT\n";
 int serverSocket = -1;
+struct options_t options;
+
+using namespace std;
 
 void cleanup()
 {
@@ -44,10 +46,10 @@ void cleanup()
 
 void signalHandler(int)
 {
-    cleanup();
+    exit(0);
 }
 
-int main(int argc, char const *argv[])
+int main()          //(int argc, char const *argv[])
 {
     int atexitResult = atexit(cleanup);
     if (atexitResult)
@@ -56,30 +58,29 @@ int main(int argc, char const *argv[])
         exit(1);
     }
 
-    // sighandler_t signalResult = signal(SIGINT, &signalHandler);
-    // if (signalResult == SIG_ERR)
+    sighandler_t signalResult = signal(SIGINT, &signalHandler);
+    if (signalResult == SIG_ERR)
+    {
+        cerr << "Failed to register signal handler.\n";
+        exit(1);
+    }
+
+    // char* endPointer;
+    // int port = strtol(argv[1], &endPointer, 10);
+    // if (*endPointer != '\0')    // non-digit characters in argument
     // {
-    //     cerr << "Failed to register signal handler.\n";
+    //     cerr << "Cannot interpret " << argv[1] << " as port number.\n";
+    //     cerr << helpMsg;
     //     exit(1);
     // }
 
-    if (argc != 2)
-    {
-        cerr << helpMsg;
-        exit(1);
-    }
-    char* endPointer;
-    int port = strtol(argv[1], &endPointer, 10);
-    if (*endPointer != '\0')    // non-digit characters in argument
-    {
-        cerr << "Cannot interpret " << argv[1] << " as port number.\n";
-        cerr << helpMsg;
-        exit(1);
-    }
+    options.port = PORT_L;
+    options.supressGA = true;
+    options.local = true;
 
     try
     {
-        serverSocket = openServerSocket(port);
+        serverSocket = openServerSocket(options.port);
     }
     catch (SocketError& e)
     {

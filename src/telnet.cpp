@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include <stdio.h>
+#include <sys/select.h>
 #include <iostream>
 #include <cassert>
 #include <string.h>
@@ -34,9 +35,9 @@ void Telnet::sendGA()
     msg[0] = IAC;
     msg[1] = GA;
 
-    pthread_mutex_lock(&(this->writeMutex));
-    int nBytes = write(this->socketDescriptor, msg, 2);
-    pthread_mutex_unlock(&(this->writeMutex));
+    pthread_mutex_lock(&writeMutex);
+    int nBytes = write(socketDescriptor, msg, 2);
+    pthread_mutex_unlock(&writeMutex);
 
     if (nBytes < 2)
     {
@@ -44,6 +45,7 @@ void Telnet::sendGA()
             throw SocketClosedError();
         if (nBytes == -1)
             throw SocketError("Error while sending GA");
+        // TODO if(nBytes == 1) -- unlikely
     }
 }
 
@@ -59,7 +61,7 @@ void Telnet::respond(unsigned char command, unsigned char option)
         case AYT:
         {
             string resp("eftp telenet");
-            this->writeLine(&resp);
+            writeLine(&resp);
             return;
         }
         case WILL:
@@ -80,9 +82,9 @@ void Telnet::respond(unsigned char command, unsigned char option)
             assert(false);
     }
 
-    pthread_mutex_lock(&(this->writeMutex));
-    int nBytes = write(this->socketDescriptor, response, resLen);
-    pthread_mutex_unlock(&(this->writeMutex));
+    pthread_mutex_lock(&writeMutex);
+    int nBytes = write(socketDescriptor, response, resLen);
+    pthread_mutex_unlock(&writeMutex);
 
     if (nBytes < resLen)
     {
@@ -107,7 +109,7 @@ void Telnet::readLine(string* line)
 
     while(true)
     {
-        int nBytes = read(this->socketDescriptor, &newChar, 1);
+        int nBytes = read(socketDescriptor, &newChar, 1);
         if (nBytes == 0)
         {
             throw SocketClosedError();
@@ -123,7 +125,7 @@ void Telnet::readLine(string* line)
         if (interpretOption)   // interpret this byte as option
         {
             #ifdef DEBUG
-                cout << "request ";
+                cout << "Telnet - request ";
                 switch (command)
                 {
                     case WILL:
@@ -138,7 +140,7 @@ void Telnet::readLine(string* line)
                 cout << (int) newChar << "\n";
             #endif
             // send negative response
-            this->respond(command, newChar);
+            respond(command, newChar);
             interpretOption = false;
         }
         else if (newChar == IAC and !interpretCommand)
@@ -171,7 +173,7 @@ void Telnet::readLine(string* line)
             }
             else if (command == AYT)    // Are you there?
             {
-                this->respond(command, (unsigned char) 0);
+                respond(command, (unsigned char) 0);
             }
             else if (command == 250)
             {
@@ -202,44 +204,73 @@ void Telnet::readLine(string* line)
                 // #ifdef DEBUG
                 //     cout << "EOL\n";
                 // #endif
-                return;
+                break;
             }
             cr = (newChar == '\r');       // CR
         }
     }
+    #ifdef DEBUG
+        cout << "Telnet - received line: " << *line;
+    #endif
 }
 
+void Telnet::writeLine(const char* line)
+{
+    size_t len = strlen(line);
+    char* terminated;
+    size_t lenTerminated;
+
+    const char* crlfPtr = strstr(line, "\r\n");   // find Telnet new line sequence
+    if (crlfPtr == NULL)                    // not found => add
+    {
+        terminated = new char[len + 3];
+        // strcpy(terminated, line);
+        memcpy(terminated, line, len);
+        // strcat(terminated, "\r\n")
+        terminated[len] = '\r';
+        terminated[len+1] = '\n';
+        terminated[len+2] = '\0';
+        lenTerminated = len + 2;
+    }
+    else
+    {
+        assert(crlfPtr == &line[len-2]);
+        terminated = (char*) line;
+        lenTerminated = len;
+    }
+
+    int writeResult;
+
+    pthread_mutex_lock(&writeMutex);
+    #ifdef DEBUG
+        cout << "Telnet - writing: " << terminated;
+    #endif
+
+    size_t i = 0;
+    while (i < lenTerminated)
+    {
+        writeResult = write(socketDescriptor, terminated + i, 1);
+        if (writeResult == 1 && (unsigned char) terminated[i] == IAC)
+        {   // double IAC bytes
+            writeResult = write(socketDescriptor, terminated + i, 1);
+        }
+        if (writeResult == 0)
+            throw SocketClosedError();
+        else if (writeResult == -1)
+            throw SocketError("Error while writing to control connection");
+        i += writeResult;
+    }
+    pthread_mutex_unlock(&writeMutex);
+
+    if (!options.supressGA)
+        sendGA();
+
+    if (terminated != line)
+        delete[] terminated;
+}
 
 void Telnet::writeLine(string* line)
 // append CR LF to line and write to connected socket
 {
-    int lineLen = line->length();
-    int finalLen = lineLen;
-    char chLine[lineLen+2];
-    assert(line->find("\r\n") >= lineLen-2);    // no extra lines
-    //if (line->find("\r\n") == string::npos)
-    if (not ((*line)[lineLen-2] == '\r' and (*line)[lineLen-1] == '\n'))
-    {
-        finalLen += 2;
-        chLine[finalLen-2] = '\r';      // CR
-        chLine[finalLen-1] = '\n';      // LF
-    }
-    strcpy(chLine, line->c_str());
-
-    pthread_mutex_lock(&(this->writeMutex));
-    #ifdef DEBUG
-        cout << "Writing: " << chLine << "\n";
-    #endif
-    int nBytes = write(this->socketDescriptor, chLine, finalLen);
-    pthread_mutex_unlock(&(this->writeMutex));
-
-    this->sendGA();
-
-    if (nBytes != finalLen)
-    {
-        if (nBytes == 0)
-            throw SocketClosedError();
-        if (nBytes == -1)
-            throw SocketError("Error while writing to control connection");
-    }
+    writeLine(line->c_str());
 }
