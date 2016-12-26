@@ -325,18 +325,41 @@ void ControlConnection::CmdPort(string* args)
 
 void ControlConnection::CmdType(string* args)
 {
-    static const char pattern[] = "[AE] [NTC]|I|L (\\d+)";
+    static const char pattern[] = "([AE])( ([NTC]))?|(I)|(L) (\\d+)";
     static const regex re(pattern, regex_constants::icase);
 
     smatch match;
 
     if (regex_match(*args, match, re))
     {
-        if ((*args)[0] == 'A' && (*args)[2] == 'N')     // ascii non-print
+        string arg1 = match.str(1) + match.str(4) + match.str(5);
+        string arg2 = match.str(3) + match.str(6);
+
+        char c1, c2;
+        c1 = arg1[0];
+        if (c1 > 90)
+        {
+            c1 -= 32;    // uppercase
+        }
+
+        if (arg2.length() > 0)
+        {
+            c2 = arg2[0];
+        }
+        else
+        {
+            c2 = '\0';
+        }
+        if (c2 > 90)
+        {
+            c2 -= 32;    // uppercase
+        }
+
+        if (c1 == 'A' && (c2 == '\0' || c2 == 'N'))     // ascii non-print
         {
             settings.ascii = true;
         }
-        else if ((*args)[0] == 'I')                   // image (binary)
+        else if (c1 == 'I')                             // image (binary)
         {
             settings.ascii = false;
         }
@@ -567,7 +590,14 @@ void ControlConnection::CmdPasv(string *args)
     {
         settings.passive = true;
         dataConnection.SetSettings(&settings);
-        dataConnection.Open();
+        try
+        {
+            dataConnection.Open();
+        }
+        catch (exception &e)
+        {
+            dataConnection.HandleException(e);
+        }
 
         struct sockaddr_in addr;
         unsigned int len = sizeof(addr);

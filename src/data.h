@@ -46,6 +46,7 @@ public:
     void Store();
     void Retrieve();
     void Abort();
+    void HandleException(std::exception& e);
 
     bool isConnected()
     {

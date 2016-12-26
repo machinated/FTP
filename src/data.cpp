@@ -26,19 +26,7 @@ void* store(void* DC_pointer)
     }
     catch (exception &e)
     {
-        cerr << "Exception in data transfer thread: " << e.what() << "\n";
-        dc->excP = current_exception();
-        try
-        {
-            dc->sendResponse(
-                "451 Requested action aborted: "
-                "local error in processing.");
-        }
-        catch (...){}
-        if (pthread_kill(dc->parent, SIGTERM))
-        {
-            cerr << "Failed to send termination signal to parent thread\n";
-        }
+        dc->HandleException(e);
     }
     return nullptr;
 }
@@ -52,21 +40,29 @@ void* retrieve(void* DC_pointer)
     }
     catch (exception &e)
     {
-        cerr << "Exception in data transfer thread: " << e.what() << "\n";
-        dc->excP = current_exception();
-        try
-        {
-            dc->sendResponse(
-                "451 Requested action aborted: "
-                "local error in processing.");
-        }
-        catch (...) {}
-        if (pthread_kill(dc->parent, SIGTERM))
-        {
-            cerr << "Failed to send termination signal to parent thread\n";
-        }
+        dc->HandleException(e);
     }
     return nullptr;
+}
+
+void DataConnection::HandleException(exception& e)
+{
+    cerr << "Exception in data transfer thread: " << e.what() << "\n";
+    excP = current_exception();
+    try
+    {
+        sendResponse(
+            "451 Requested action aborted: "
+            "local error in processing.");
+    }
+    catch (...)
+    {
+        cerr << "Failed to send negative response after exception\n";
+    }
+    if (pthread_kill(parent, SIGTERM))
+    {
+        cerr << "Failed to send termination signal to parent thread\n";
+    }
 }
 
 void DataConnection::sendResponse(const char response[])
@@ -115,12 +111,12 @@ void DataConnection::Connect()
             throw SocketError("Failed to create socket for data connection");
         }
 
-        char reuse_addr_val = 1;
+        int reuse_addr_val = 1;
         setsockopt(connDesc, SOL_SOCKET, SO_REUSEADDR,
-                   (char*)&reuse_addr_val, sizeof(reuse_addr_val));
+                   &reuse_addr_val, sizeof(reuse_addr_val));
 
         setsockopt(connDesc, SOL_SOCKET, SO_REUSEPORT,
-                   (char*)&reuse_addr_val, sizeof(reuse_addr_val));
+                   &reuse_addr_val, sizeof(reuse_addr_val));
 
         int bindResult = bind(connDesc,
                               (struct sockaddr*) &(settings.addrLocal),
@@ -135,7 +131,16 @@ void DataConnection::Connect()
                              sizeof(struct sockaddr));
         if (connectRes < 0)
         {
-            throw SocketError("Couldn't connect to client for data transfer");
+            if (errno == ECONNREFUSED)
+            {
+                sendResponse("425 Cannot open data connection: "
+                             "connection refused");
+            }
+            else
+            {
+                throw SocketError(
+                    "Couldn't connect to client for data transfer");
+            }
         }
     }
 }

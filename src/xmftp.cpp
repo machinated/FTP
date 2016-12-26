@@ -12,6 +12,7 @@
 #include <time.h>
 #include <pthread.h>
 #include <signal.h>
+#include <getopt.h>
 #include <string>
 #include <iostream>
 
@@ -24,6 +25,14 @@ int serverSocket = -1;
 struct options_t options;
 
 using namespace std;
+
+const char* helpMsg =
+"Usage: xmftp [OPTIONS]"                                                    "\n"
+"   -p PORT, --port         specify port number, default is 21"             "\n"
+"   -l, --local             accept only connections from localhost"         "\n"
+"   -g, --sendGA            send Go Ahead commands via Telnet, defult=no"   "\n"
+"   -r, --readonly          make all sessions read only"                    "\n"
+"   -h, --help              show this message"                              "\n";
 
 void cleanup()
 {
@@ -49,7 +58,65 @@ void signalHandler(int)
     exit(0);
 }
 
-int main()          //(int argc, char const *argv[])
+int parseOptions(int argc, char *argv[])
+{
+    static struct option long_options[] =
+    {
+        {"port",        required_argument,  0, 'p'},
+        {"local",       no_argument,        0, 'l'},
+        {"sendga",      no_argument,        0, 'g'},
+        {"readonly",    no_argument,        0, 'r'},
+        {"help",        no_argument,        0, 'h'},
+        {0,             0,                  0,  0 }
+    };
+    int c;
+
+    while (1)
+    {
+        int option_index;
+        c = getopt_long(argc, argv, "p:lgrh", long_options, &option_index);
+        if (c == -1)
+            break;
+
+        switch(c)
+        {
+        case 'p':
+        {
+            unsigned int newport = (unsigned int) atoi(optarg);
+            if (newport == 21 || (newport > 1024 && newport < 256*256))
+                options.port = newport;
+            else
+                cerr << "Invalid port: " << optarg << "\n";
+            break;
+        }
+
+        case 'l':
+            options.local = true;
+            break;
+
+        case 'g':
+            options.supressGA = false;
+            break;
+
+        case 'r':
+            break;
+
+        case 'h':
+            cout << helpMsg;
+            return 1;
+
+        case '?':
+            return 1;
+
+        default:
+            cerr << "Getopt returned character code " << c << "\n";
+        }
+    }
+
+    return 0;
+}
+
+int main(int argc, char* argv[])
 {
     int atexitResult = atexit(cleanup);
     if (atexitResult)
@@ -76,7 +143,12 @@ int main()          //(int argc, char const *argv[])
 
     options.port = PORT_L;
     options.supressGA = true;
-    options.local = true;
+    options.local = false;
+
+    if (parseOptions(argc, argv))
+    {
+        exit(1);
+    }
 
     try
     {

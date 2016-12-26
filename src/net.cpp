@@ -17,7 +17,7 @@ int openServerSocket(sockaddrp serverAddress)
     int serverDesc;
     int bindResult;
     int listenResult;
-    char reuse_addr_val = 1;
+    int reuse_addr_val = 1;
 
     serverDesc = socket(AF_INET, SOCK_STREAM, 0);
     if (serverDesc < 0)
@@ -25,10 +25,10 @@ int openServerSocket(sockaddrp serverAddress)
         throw SocketError("Failed to create network socket");
     }
     setsockopt(serverDesc, SOL_SOCKET, SO_REUSEADDR,
-               (char*)&reuse_addr_val, sizeof(reuse_addr_val));
+               &reuse_addr_val, sizeof(reuse_addr_val));
 
     setsockopt(serverDesc, SOL_SOCKET, SO_REUSEPORT,
-               (char*)&reuse_addr_val, sizeof(reuse_addr_val));
+               &reuse_addr_val, sizeof(reuse_addr_val));
 
     bindResult = bind(serverDesc,
                        (struct sockaddr*)serverAddress,
