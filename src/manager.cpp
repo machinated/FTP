@@ -682,7 +682,7 @@ void ControlConnection::CmdMkd(string* args)
         return;
     }
 
-    int mkdirResult = mkdir(args->c_str(), 0666);
+    int mkdirResult = mkdir(args->c_str(), 0777);
 
     if (mkdirResult == 0)
     {
