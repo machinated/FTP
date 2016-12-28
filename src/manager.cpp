@@ -1,3 +1,4 @@
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
@@ -7,6 +8,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <assert.h>
 #include <errno.h>
 
@@ -24,14 +26,14 @@ pthread_mutex_t ControlConnection::listMutex = PTHREAD_MUTEX_INITIALIZER;
 
 enum Commands
 {
-    USER, PASS, ACCT, CDW, CDUP, SMNT, QUIT, REIN, PORT, PASV, TYPE, STRU, MODE,
+    USER, PASS, ACCT, CWD, CDUP, SMNT, QUIT, REIN, PORT, PASV, TYPE, STRU, MODE,
     RETR, STOR, STOU, APPE, ALLO, REST, RNFR, RNTO, ABOR, DELE, RMD, MKD, PWD,
     LIST, NLST, SITE, SYST, STAT, HELP, NOOP
 };
 
 #define NCOMMANDS 33
 const char* CommandStrings[] = {
-    "USER", "PASS", "ACCT", "CDW", "CDUP", "SMNT", "QUIT", "REIN", "PORT",
+    "USER", "PASS", "ACCT", "CWD", "CDUP", "SMNT", "QUIT", "REIN", "PORT",
     "PASV", "TYPE", "STRU", "MODE", "RETR", "STOR", "STOU", "APPE", "ALLO",
     "REST", "RNFR", "RNTO", "ABOR", "DELE", "RMD", "MKD", "PWD", "LIST", "NLST",
     "SITE", "SYST", "STAT", "HELP", "NOOP"
@@ -43,6 +45,17 @@ typedef struct Command
     int argc;
     string* args;
 }Command;
+
+bool checkName(string* arg)
+{
+    static const char pattern[] = "[[:print:]]+";
+    static const regex re(pattern, regex_constants::icase);
+
+    string fname;
+    smatch match;
+
+    return (regex_match(*arg, match, re) && match.size() == 1);
+}
 
 int parseLine(const string* line, string* args)
 {   // split line into command and arguments
@@ -75,7 +88,9 @@ int parseLine(const string* line, string* args)
         size_t cmdLen = strlen(CommandStrings[i]);
         if (strncasecmp(cPtr, CommandStrings[i], cmdLen) == 0)
         {
-            return i;
+            char end = cPtr[cmdLen];
+            if (end == '\0' || end == '\r')
+                return i;
         }
     }
     return -1;
@@ -90,7 +105,7 @@ void* runCC(void* cc_p)
 
 ControlConnection::ControlConnection(int socketDescriptor)
     : socket(socketDescriptor), telnet(socketDescriptor),
-      dataConnection(pthread_self(), &telnet), user("")
+      dataConnection(&telnet), user("")
 {
     pthread_mutex_lock(&listMutex);
     List.push_back(this);
@@ -170,6 +185,8 @@ void ControlConnection::Run()
         commandHandlers[i] = &ControlConnection::CmdNotImplemented;  // default
     }
     commandHandlers[USER] = &ControlConnection::CmdUser;
+    commandHandlers[CWD] = &ControlConnection::CmdCwd;
+    commandHandlers[CDUP] = &ControlConnection::CmdCdup;
     commandHandlers[QUIT] = &ControlConnection::CmdQuit;
     commandHandlers[PORT] = &ControlConnection::CmdPort;
     commandHandlers[TYPE] = &ControlConnection::CmdType;
@@ -177,8 +194,12 @@ void ControlConnection::Run()
     commandHandlers[STRU] = &ControlConnection::CmdStru;
     commandHandlers[RETR] = &ControlConnection::CmdRetr;
     commandHandlers[STOR] = &ControlConnection::CmdStor;
+    commandHandlers[ABOR] = &ControlConnection::CmdAbor;
+    commandHandlers[DELE] = &ControlConnection::CmdDele;
     commandHandlers[NOOP] = &ControlConnection::CmdNoop;
     commandHandlers[MKD] = &ControlConnection::CmdMkd;
+    commandHandlers[NLST] = &ControlConnection::CmdNlst;
+    commandHandlers[LIST] = &ControlConnection::CmdNlst;    // TODO check OK ?!
     commandHandlers[RMD] = &ControlConnection::CmdRmd;
     commandHandlers[PASV] = &ControlConnection::CmdPasv;
 
@@ -193,35 +214,52 @@ void ControlConnection::Run()
         }
     }
 
-    sendResponse("220 eftp avaiting input");
+    sendResponse("220 xmftp avaiting input");
 
     while(run)
     {
         try
         {
-            string line;
-            telnet.readLine(&line);
-
-            string args;
-            int command = parseLine(&line, &args);
-            if (command == -1)
+            fd_set watchedFiles;
+            FD_ZERO(&watchedFiles);
+            FD_SET(telnet.socketDescriptor, &watchedFiles);
+            FD_SET(dataConnection.pipe.descR, &watchedFiles);
+            int selectResult = select(FD_SETSIZE, &watchedFiles, NULL, NULL, NULL);
+            if (selectResult == -1)
             {
-                sendResponse("500 Syntax error, command unrecognized.");
+                throw SystemError("'select' call error");
             }
-            else
+
+            if (FD_ISSET(telnet.socketDescriptor, &watchedFiles))
             {
-                (this->*commandHandlers[command])(&args);
+                string line;
+                telnet.readLine(&line);
+
+                string args;
+                int command = parseLine(&line, &args);
+                if (command == -1)
+                {
+                    sendResponse("500 Syntax error, command unrecognized.");
+                }
+                else
+                {
+                    (this->*commandHandlers[command])(&args);
+                }
+            }
+
+            if (FD_ISSET(dataConnection.pipe.descR, &watchedFiles))
+            {
+                run = false;
             }
         }
         catch (SocketClosedError& e)
         {
             cout << "Socket closed by other party\n";
-            // TODO send response
             break;
         }
         catch (SocketError& e)
         {
-            cerr << "Network error " << e.code() << e.what() << "\n";
+            cerr << "Network error " << e.code() << " " << e.what() << "\n";
             break;
         }
     }
@@ -238,6 +276,50 @@ void ControlConnection::CmdUser(string* args)
 {
     user = *args;
     sendResponse("230 User logged in, proceed.");
+}
+
+void ControlConnection::CmdCwd(string* args)
+{
+    int chdirResult = chdir(args->c_str());
+
+    if (chdirResult == 0)
+    {
+        sendResponse("250 Requested file action okay, comleted.");
+    }
+    else
+    {
+        if (errno == ENOTDIR)
+        {
+            sendResponse(
+                "550 Requested action not taken: "
+                "not a directory.");
+        }
+        else if (errno == ENOENT)
+        {
+            sendResponse(
+                "550 Requested action not taken: "
+                "directory does not exist.");
+        }
+        else
+        {
+            cerr << "Error changing to directory: " << *args << "\n";
+            sendResponse("451 Requested action aborted: "
+                          "local error in processing.");
+        }
+    }
+}
+
+void ControlConnection::CmdCdup(string* args)
+{
+    if (args->length() == 0)
+    {
+        string up("..");
+        CmdCwd(&up);
+    }
+    else
+    {
+        sendResponse("501 Syntax error in parameters or arguments.");
+    }
 }
 
 void ControlConnection::CmdQuit(string* args)
@@ -433,31 +515,13 @@ void ControlConnection::CmdStru(string* args)
 
 void ControlConnection::CmdRetr(string* args)
 {
-    static const char pattern[] = "[[:print:]]+";
-    static const regex re(pattern, regex_constants::icase);
-
-    string fname;
-    smatch match;
-
-    if (regex_match(*args, match, re) && match.size() == 1)
-    {
-        fname = string(match.str(0));
-    }
-    else
-    {
-        sendResponse(
-            "553 Requested file action not taken. "
-            "File name not allowed.");
-        return;
-    }
-
     if (dataConnection.active)
     {
         sendResponse("400 Processing previous command");
         return;
     }
 
-    int fileDesc = open(fname.c_str(), O_RDONLY);
+    int fileDesc = open(args->c_str(), O_RDONLY);
     if (fileDesc == -1)
     {
         if (errno == ENOENT)
@@ -476,31 +540,12 @@ void ControlConnection::CmdRetr(string* args)
         return;
     }
 
-    dataConnection.SetFile(fileDesc);
-    dataConnection.active = true;
-
-    int createResult = pthread_create(&(dataConnection.thread), NULL, &retrieve,
-                                      (void*) &dataConnection);
-    if (createResult)
-    {
-        cerr << "Failed to start new thread.\n";
-        exit(1);
-    }
+    dataConnection.ThreadRetrieve(fileDesc);
 }
 
 void ControlConnection::CmdStor(string* args)
 {
-    static const char pattern[] = "[[:print:]]+";
-    static const regex re(pattern, regex_constants::icase);
-
-    string fname;
-    smatch match;
-
-    if (regex_match(*args, match, re) && match.size() == 1)
-    {
-        fname = string(match.str(0));
-    }
-    else
+    if (!checkName(args))
     {
         sendResponse(
             "553 Requested file action not taken. "
@@ -515,10 +560,10 @@ void ControlConnection::CmdStor(string* args)
     }
     // open file for writing, create it if it doesn't exist, truncate if it does
     // read and write permission for user, group and others
-    int fileDesc = open(fname.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    int fileDesc = open(args->c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fileDesc == -1)
     {
-        if (errno == ENOSPC)
+        if (errno == ENOSPC || errno == EDQUOT)
         {
             sendResponse(
                 "452 Requested file action not taken. "
@@ -527,7 +572,7 @@ void ControlConnection::CmdStor(string* args)
         else if (errno == EISDIR)
         {
             sendResponse(
-                "553 Requested file action not taken."
+                "550 Requested file action not taken."
                 "File name refers to a directory.");
         }
         else if (errno == ENAMETOOLONG)
@@ -546,15 +591,71 @@ void ControlConnection::CmdStor(string* args)
         return;
     }
 
-    dataConnection.SetFile(fileDesc);
-    dataConnection.active = true;
+    dataConnection.ThreadStore(fileDesc);
+}
 
-    int createResult = pthread_create(&(dataConnection.thread), NULL, &store,
-                                      (void*) &dataConnection);
-    if (createResult)
+void ControlConnection::CmdAbor(string* args)
+{
+    if (args->length() == 0)
     {
-        cerr << "Failed to start new thread.\n";
-        exit(1);
+        if (dataConnection.active)
+        {
+            dataConnection.Abort();
+        }
+        else
+        {
+            dataConnection.Close();
+        }
+        sendResponse(
+            "226 Closing data connection; "
+            "action successfully aborted.");
+    }
+    else
+    {
+        sendResponse("501 Syntax error in parameters or arguments.");
+    }
+}
+
+void ControlConnection::CmdDele(string* args)
+{
+    int unlinkResult = unlink(args->c_str());
+
+    if (unlinkResult == 0)
+    {
+        sendResponse("250 Requested file action okay, completed.");
+    }
+    else
+    {
+        if (errno == EBUSY)
+        {
+            sendResponse(
+                "450 Requested file action not taken: "
+                "file busy.");
+        }
+        if (errno == ENOENT)
+        {
+            sendResponse(
+                "550 Requested action not taken. "
+                "File does not exist");
+        }
+        else if (errno == EISDIR)
+        {
+            sendResponse(
+                "550 Requested file action not taken."
+                "File name refers to a directory.");
+        }
+        else if (errno == ENAMETOOLONG)
+        {
+            sendResponse(
+                "553 Requested file action not taken."
+                "File name too long.");
+        }
+        else
+        {
+            sendResponse(
+                "451 Requested action aborted: "
+                "local error in processing.");
+        }
     }
 }
 
@@ -580,6 +681,56 @@ void ControlConnection::CmdRmd(string*)
     ;   // TODO man 2 rmdir the FTP server's port 20
 }
 
+void ControlConnection::CmdNlst(string* args)
+{
+    DIR* dirStream;
+
+    if (args->length() == 0)
+    {
+        char* dirname = getcwd(NULL, 0);
+        if (dirname == NULL)
+        {
+            sendResponse("451 Requested action aborted: "
+                          "local error in processing.");
+            return;
+        }
+        cout << "Opening directory: " << dirname << "\n";
+        dirStream = opendir(dirname);
+        free(dirname);
+    }
+    else
+    {
+        dirStream = opendir(args->c_str());
+    }
+
+
+
+    if (dirStream == NULL)
+    {
+        if (errno == ENOTDIR)
+        {
+            sendResponse(
+                "550 Requested action not taken: "
+                "not a directory.");
+        }
+        else if (errno == ENOENT)
+        {
+            sendResponse(
+                "550 Requested action not taken: "
+                "directory does not exist.");
+        }
+        else
+        {
+            cerr << "Error opening directory." << "\n";
+            sendResponse("451 Requested action aborted: "
+                          "local error in processing.");
+        }
+        return;
+    }
+
+    dataConnection.ThreadNlist(dirStream);
+}
+
 void ControlConnection::CmdPasv(string *args)
 {
     #ifdef DEBUG
@@ -594,7 +745,7 @@ void ControlConnection::CmdPasv(string *args)
         {
             dataConnection.Open();
         }
-        catch (exception &e)
+        catch (system_error &e)
         {
             dataConnection.HandleException(e);
         }

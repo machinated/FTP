@@ -5,8 +5,10 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <dirent.h>
 
 #include "telnet.h"
+#include "net.h"
 
 
 typedef struct dataConnSettings
@@ -25,6 +27,7 @@ typedef struct dataConnSettings
 
 void* store(void* DC_pointer);
 void* retrieve(void* DC_pointer);
+void* nlist(void* DC_pointer);
 
 class DataConnection
 {
@@ -32,21 +35,27 @@ class DataConnection
     Telnet* telnet;
     int connDesc;
     int fileDesc;
+    DIR* dirDesc;
     bool abort;
+    void SetFile(int fdesc);
+    void SetDir(DIR* dDesc);
 
 public:
-    DataConnection(pthread_t parent, Telnet* telnet);
+    DataConnection(Telnet* telnet);
     ~DataConnection();
     void sendResponse(const char response[]);
     void SetSettings(dataConnSettings* conn_settings);
-    void SetFile(int fdesc);
     void Open();
     void Connect();
     void Close();
+    void Abort();
     void Store();
     void Retrieve();
-    void Abort();
-    void HandleException(std::exception& e);
+    void Nlist();
+    void HandleException(std::system_error& e);
+    void ThreadStore(int fdesc);
+    void ThreadRetrieve(int fdesc);
+    void ThreadNlist(DIR* dDesc);
 
     bool isConnected()
     {
@@ -56,8 +65,8 @@ public:
     int serverSocket;
     bool active;
     pthread_t thread;
-    pthread_t parent;
     std::exception_ptr excP;
+    MutexPipe pipe;
 };
 
 #endif

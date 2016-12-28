@@ -21,10 +21,29 @@ struct options_t
 
 extern struct options_t options;
 
+class MutexPipe
+{
+    // POSIX pipe with exclusive access
+    pthread_mutex_t pipeLock = PTHREAD_MUTEX_INITIALIZER;
+public:
+    MutexPipe();
+    int descW, descR;
+    void readMutex(std::string* line);
+    void writeMutex(const char line[], size_t len);
+    void writeMutex(std::string* line);
+};
+
 class SocketError : public std::system_error
 {
 public:
     SocketError(const char* what_arg)
+        : std::system_error(errno, std::system_category(), what_arg) {}
+};
+
+class RefusedError : public std::system_error
+{
+public:
+    RefusedError(const char* what_arg)
         : std::system_error(errno, std::system_category(), what_arg) {}
 };
 
@@ -52,7 +71,7 @@ class PipeError : public std::runtime_error
 {
 public:
     PipeError(const char* what_arg)
-        : std::runtime_error(what_arg) {}
+        : runtime_error(what_arg) {}
 };
 
 #endif

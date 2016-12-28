@@ -24,7 +24,7 @@ void* store(void* DC_pointer)
     {
         dc->Store();
     }
-    catch (exception &e)
+    catch (system_error &e)
     {
         dc->HandleException(e);
     }
@@ -38,16 +38,73 @@ void* retrieve(void* DC_pointer)
     {
         dc->Retrieve();
     }
-    catch (exception &e)
+    catch (system_error &e)
     {
         dc->HandleException(e);
     }
     return nullptr;
 }
 
-void DataConnection::HandleException(exception& e)
+void* nlist(void* DC_pointer)
 {
-    cerr << "Exception in data transfer thread: " << e.what() << "\n";
+    DataConnection* dc = (DataConnection*) DC_pointer;
+    try
+    {
+        dc->Nlist();
+    }
+    catch (system_error &e)
+    {
+        dc->HandleException(e);
+    }
+    return nullptr;
+}
+
+void DataConnection::ThreadStore(int fdesc)
+{
+    SetFile(fdesc);
+    active = true;
+
+    int createResult = pthread_create(&thread, NULL, &store,
+                                      (void*) this);
+    if (createResult)
+    {
+        cerr << "Failed to start new thread.\n";
+        exit(1);
+    }
+}
+
+void DataConnection::ThreadRetrieve(int fdesc)
+{
+    SetFile(fdesc);
+    active = true;
+
+    int createResult = pthread_create(&thread, NULL, &retrieve,
+                                      (void*) this);
+    if (createResult)
+    {
+        cerr << "Failed to start new thread.\n";
+        exit(1);
+    }
+}
+
+void DataConnection::ThreadNlist(DIR* dDesc)
+{
+    SetDir(dDesc);
+    active = true;
+
+    int createResult = pthread_create(&thread, NULL, &nlist,
+                                      (void*) this);
+    if (createResult)
+    {
+        cerr << "Failed to start new thread.\n";
+        exit(1);
+    }
+}
+
+void DataConnection::HandleException(system_error& e)
+{
+    cerr << "Exception in data transfer thread " << e.code() << " ";
+    cerr << e.what() << "\n";
     excP = current_exception();
     try
     {
@@ -59,10 +116,8 @@ void DataConnection::HandleException(exception& e)
     {
         cerr << "Failed to send negative response after exception\n";
     }
-    if (pthread_kill(parent, SIGTERM))
-    {
-        cerr << "Failed to send termination signal to parent thread\n";
-    }
+    active = false;
+    pipe.writeMutex("S", 1);
 }
 
 void DataConnection::sendResponse(const char response[])
@@ -73,9 +128,9 @@ void DataConnection::sendResponse(const char response[])
     #endif
 }
 
-DataConnection::DataConnection(pthread_t parent, Telnet* telnet)
+DataConnection::DataConnection(Telnet* telnet)
 : telnet(telnet), connDesc(0), fileDesc(0), abort(false), serverSocket(0),
-  active(false), parent(parent)
+  active(false)
 {
     settings.mode = 0;
     #define SETTINGS_SET settings.mode
@@ -131,10 +186,12 @@ void DataConnection::Connect()
                              sizeof(struct sockaddr));
         if (connectRes < 0)
         {
+            connDesc = 0;
             if (errno == ECONNREFUSED)
             {
                 sendResponse("425 Cannot open data connection: "
                              "connection refused");
+                throw RefusedError("");
             }
             else
             {
@@ -172,6 +229,12 @@ void DataConnection::SetFile(int fdesc)
     fileDesc = fdesc;
 }
 
+void DataConnection::SetDir(DIR* dDesc)
+{
+    assert(!active);
+    dirDesc = dDesc;
+}
+
 DataConnection::~DataConnection()
 {
     close(connDesc);
@@ -197,7 +260,15 @@ void DataConnection::Store()
         sendResponse(
             "150  File status okay; "
             "about to open data connection.");
-        Connect();
+        try
+        {
+            Connect();
+        }
+        catch (RefusedError &e)
+        {
+            active = false;
+            return;
+        }
     }
 
     int nBytesR, nBytesW, writeRes;
@@ -209,11 +280,6 @@ void DataConnection::Store()
     {
         if (abort)
         {
-            sendResponse(
-                "426 Transfer aborted."
-            );
-            abort = false;
-            Close();
             break;
         }
         if (settings.ascii)
@@ -233,7 +299,6 @@ void DataConnection::Store()
             sendResponse(
                 "226 Closing data connection. "
                 "File transfer successful.");
-            Close();
             break;
         }
         if (settings.ascii)
@@ -265,12 +330,25 @@ void DataConnection::Store()
             writeRes = write(fileDesc, buffer + nBytesW, nBytesR);
             if (writeRes == -1)
             {
+                if (errno == EDQUOT || errno == ENOSPC)
+                {
+                    sendResponse(
+                        "452 Requested file action not taken. "
+                        "Insufficient storage space in system.");
+                }
                 throw SystemError("Error while writing file");
             }
             nBytesW += writeRes;
         }
     }
+    Close();
+    close(fileDesc);
     active = false;
+    if (abort)
+    {
+        abort = false;
+        // TODO remove file
+    }
 }
 
 void DataConnection::Retrieve()
@@ -286,7 +364,15 @@ void DataConnection::Retrieve()
         sendResponse(
             "150  File status okay; "
             "about to open data connection.");
-        Connect();
+        try
+        {
+            Connect();
+        }
+        catch (RefusedError &e)
+        {
+            active = false;
+            return;
+        }
     }
 
     int nBytesR, nBytesW, writeRes;
@@ -296,9 +382,7 @@ void DataConnection::Retrieve()
     {
         if (abort)
         {
-            sendResponse("426 Transfer aborted.");
             abort = false;
-            Close();
             break;
         }
         if (settings.ascii)
@@ -318,7 +402,6 @@ void DataConnection::Retrieve()
             sendResponse(
                 "226 Closing data connection. "
                 "File transfer successful.");
-            Close();
             break;
         }
         if (settings.ascii)
@@ -339,7 +422,6 @@ void DataConnection::Retrieve()
                 if (errno == EPIPE)
                 {
                     sendResponse("426 Connection closed; transfer aborted.");
-                    Close();
                     break;
                 }
                 else
@@ -350,5 +432,99 @@ void DataConnection::Retrieve()
             nBytesW += writeRes;
         }
     }
+    Close();
+    close(fileDesc);
+    active = false;
+}
+
+void DataConnection::Nlist()
+{
+    assert(dirDesc != NULL);
+
+    if (isConnected())
+    {
+        sendResponse(
+            "125 Data connection already open; "
+            "transfer starting");
+    }
+    else
+    {
+        sendResponse(
+            "150  File status okay; "
+            "about to open data connection.");
+        try
+        {
+            Connect();
+        }
+        catch (RefusedError &e)
+        {
+            active = false;
+            return;
+        }
+    }
+
+    struct dirent dirStruct;
+    struct dirent* dirStructP;
+    int readdirResult;
+    char filename[258];      // 256 + CR LF
+    size_t len, nBytesW;
+    int writeRes;
+
+    while (true)
+    {
+        if (abort)
+        {
+            abort = false;
+            break;
+        }
+
+        // thread-safe version
+        readdirResult = readdir_r(dirDesc, &dirStruct, &dirStructP);
+        if (readdirResult != 0)
+        {
+            cerr << "Error reading directory\n";
+            sendResponse(
+                "451 Requested action aborted: "
+                "local error in processing.");
+            break;
+        }
+        if (dirStructP == NULL)
+        {
+            // sendResponse("250 Requested file action okay, completed.");
+            // break;
+            sendResponse(
+                "226 Closing data connection. "
+                "File transfer successful.");
+            break;
+        }
+
+        char* end = stpcpy(filename, dirStruct.d_name);
+        end[0] = '\r';
+        end[1] = '\n';
+        end[2] = '\0';
+
+        len = strlen(filename);
+
+        nBytesW = 0;
+        while (nBytesW < len)
+        {
+            writeRes = write(connDesc, filename + nBytesW, len);
+            if (writeRes == -1)
+            {
+                if (errno == EPIPE)
+                {
+                    sendResponse("426 Connection closed; transfer aborted.");
+                    break;
+                }
+                else
+                {
+                    throw SocketError("Error sending data");
+                }
+            }
+            nBytesW += writeRes;
+        }
+    }
+    Close();
+    closedir(dirDesc);
     active = false;
 }

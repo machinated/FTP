@@ -185,9 +185,12 @@ void Telnet::readLine(string* line)
             }
             else if (command < 240)
             {
-                char errMsg[50];
-                sprintf(errMsg, "Invalid telnet command: %d", command);
-                throw CommandError(errMsg);
+                // char errMsg[50];
+                // sprintf(errMsg, "Invalid telnet command: %d", command);
+                // throw CommandError(errMsg);
+                #ifdef DEBUG
+                    cerr << "Invalid telned command: " << command << "\n";
+                #endif
             }
         }
         else    // regular character

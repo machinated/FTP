@@ -59,3 +59,62 @@ int openServerSocket(int port)
 
     return openServerSocket(&serverAddress);
 }
+
+MutexPipe::MutexPipe()
+{
+    #define PIPE_BUF_S 100
+    int pipefd[2];
+    int pipeResult = pipe(pipefd);
+    if (pipeResult == -1)
+    {
+        throw SystemError("Error creating pipe");
+    }
+    descR = pipefd[0];
+    descW = pipefd[1];
+}
+
+void MutexPipe::readMutex(std::string* line)
+{
+    int nBytes = PIPE_BUF_S;
+    char buffer[PIPE_BUF_S];
+    line->clear();
+
+    pthread_mutex_lock(&pipeLock);
+    while (nBytes == PIPE_BUF_S)
+    {
+        nBytes = read(descR, buffer, PIPE_BUF_S);
+        if (nBytes == -1)
+        {
+            throw SystemError("Error reading from pipe");
+        }
+        line->append(buffer, nBytes);
+    }
+    pthread_mutex_unlock(&pipeLock);
+}
+
+void MutexPipe::writeMutex(const char line[], size_t len)
+{
+    unsigned int nBytesW = 0;
+    int nBytes;
+
+    pthread_mutex_lock(&pipeLock);
+    while (nBytesW < len)
+    {
+        nBytes = write(descW, &line[nBytesW], len - nBytesW);
+        if (nBytes == -1)
+        {
+            throw SystemError("Error writing to pipe");
+        }
+        else if (nBytes == 0)
+        {
+            throw PipeError("Cannot write more data to pipe");
+        }
+        nBytesW += nBytes;
+    }
+    pthread_mutex_unlock(&pipeLock);
+}
+
+void MutexPipe::writeMutex(std::string* line)
+{
+    writeMutex(line->data(), line->length());
+}

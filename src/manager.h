@@ -28,17 +28,22 @@ public:
     void sendResponse(const char response[]);
 
     void CmdUser(std::string* args);
+    void CmdCwd(std::string* args);
+    void CmdCdup(std::string* args);
     void CmdQuit(std::string* args);
     void CmdPort(std::string* args);
+    void CmdPasv(std::string* args);
     void CmdType(std::string* args);
     void CmdMode(std::string* args);
     void CmdStru(std::string* args);
     void CmdRetr(std::string* args);
     void CmdStor(std::string* args);
-    void CmdNoop(std::string* args);
+    void CmdAbor(std::string* args);
+    void CmdDele(std::string* args);
     void CmdMkd(std::string* args);
     void CmdRmd(std::string* args);
-    void CmdPasv(std::string* args);
+    void CmdNlst(std::string* args);
+    void CmdNoop(std::string* args);
     void CmdNotImplemented(std::string* args);
 
     // typedef void (*CmdHandlerP)(string* args);

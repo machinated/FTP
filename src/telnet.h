@@ -6,13 +6,13 @@
 
 class Telnet
 {
-    int socketDescriptor;
     pthread_mutex_t writeMutex;
 
     void respond(unsigned char command, unsigned char option);
     void sendGA();
 
 public:
+    int socketDescriptor;
     Telnet(int socket);
     // 'socket' must be open connection descriptor
     void readLine(std::string* line);

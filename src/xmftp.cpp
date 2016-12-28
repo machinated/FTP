@@ -118,12 +118,12 @@ int parseOptions(int argc, char *argv[])
 
 int main(int argc, char* argv[])
 {
-    int atexitResult = atexit(cleanup);
-    if (atexitResult)
-    {
-        cerr << "Failed to register 'atexit' function.\n";
-        exit(1);
-    }
+    // int atexitResult = atexit(cleanup);
+    // if (atexitResult)
+    // {
+    //     cerr << "Failed to register 'atexit' function.\n";
+    //     exit(1);
+    // }
 
     sighandler_t signalResult = signal(SIGINT, &signalHandler);
     if (signalResult == SIG_ERR)
@@ -159,6 +159,7 @@ int main(int argc, char* argv[])
         cerr << "Network error " << e.code() << e.what() << "\n";
         exit(1);
     }
+    cout << "Service started.\n";
 
     while(true)
     {
