@@ -635,20 +635,20 @@ void ControlConnection::CmdDele(string* args)
         if (errno == ENOENT)
         {
             sendResponse(
-                "550 Requested action not taken. "
-                "File does not exist");
+                "550 Requested action not taken: "
+                "file does not exist");
         }
         else if (errno == EISDIR)
         {
             sendResponse(
-                "550 Requested file action not taken."
-                "File name refers to a directory.");
+                "550 Requested file action not taken: "
+                "file name refers to a directory.");
         }
         else if (errno == ENAMETOOLONG)
         {
             sendResponse(
-                "553 Requested file action not taken."
-                "File name too long.");
+                "553 Requested file action not taken: "
+                "file name too long.");
         }
         else
         {
@@ -671,14 +671,104 @@ void ControlConnection::CmdNoop(string* args)
     }
 }
 
-void ControlConnection::CmdMkd(string*)
+void ControlConnection::CmdMkd(string* args)
 {
-    ;   // TODO man 2 mkd
+    if (!checkName(args))
+    {
+        sendResponse(
+            "553 Requested file action not taken. "
+            "File name not allowed.");
+        return;
+    }
+
+    int mkdirResult = mkdir(args->c_str(), 0666);
+
+    if (mkdirResult == 0)
+    {
+        char msg[1024];
+        snprintf(msg, 1024, "257 \"%s\" created.", args->c_str());
+        sendResponse(msg);
+    }
+    else
+    {
+        if (errno == ENOSPC || errno == EDQUOT)
+        {
+            sendResponse(
+                "452 Requested directory action not taken: "
+                "insufficient storage space in system.");
+        }
+        else if (errno == ENOTDIR)
+        {
+            sendResponse("553 Invalid directory name");
+        }
+        else if (errno == EEXIST)
+        {
+            sendResponse(
+                "550 Requested directory action not taken: "
+                "file or directory with the same name already exists");
+        }
+        else if (errno == ENAMETOOLONG)
+        {
+            sendResponse(
+                "553 Requested directory action not taken: "
+                "file name too long.");
+        }
+        else
+        {
+            sendResponse(
+                "451 Requested action aborted: "
+                "local error in processing.");
+        }
+    }
 }
 
-void ControlConnection::CmdRmd(string*)
+void ControlConnection::CmdRmd(string* args)
 {
-    ;   // TODO man 2 rmdir the FTP server's port 20
+    int rmdirResult = rmdir(args->c_str());
+
+    if (rmdirResult == 0)
+    {
+        sendResponse("250 Requested file action okay, completed.");
+    }
+    else
+    {
+        if (errno == EBUSY)
+        {
+            sendResponse(
+                "450 Requested directory action not taken: "
+                "file busy.");
+        }
+        if (errno == ENOENT)
+        {
+            sendResponse(
+                "550 Requested action not taken: "
+                "directory does not exist");
+        }
+        else if (errno == ENOTDIR)
+        {
+            sendResponse(
+                "550 Requested directory action not taken: "
+                "name does not refer to directory.");
+        }
+        else if (errno == ENOTEMPTY || errno == EEXIST)
+        {
+            sendResponse(
+                "550 Requested directory action not taken: "
+                "Directory is not empty.");
+        }
+        else if (errno == ENAMETOOLONG)
+        {
+            sendResponse(
+                "553 Requested directory action not taken: "
+                "path is too long.");
+        }
+        else
+        {
+            sendResponse(
+                "451 Requested action aborted: "
+                "local error in processing.");
+        }
+    }
 }
 
 void ControlConnection::CmdNlst(string* args)
