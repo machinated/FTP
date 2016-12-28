@@ -201,6 +201,7 @@ void ControlConnection::Run()
     commandHandlers[NLST] = &ControlConnection::CmdNlst;
     commandHandlers[LIST] = &ControlConnection::CmdNlst;    // TODO check OK ?!
     commandHandlers[RMD] = &ControlConnection::CmdRmd;
+    commandHandlers[PWD] = &ControlConnection::CmdPwd;
     commandHandlers[PASV] = &ControlConnection::CmdPasv;
 
 
@@ -768,6 +769,44 @@ void ControlConnection::CmdRmd(string* args)
                 "451 Requested action aborted: "
                 "local error in processing.");
         }
+    }
+}
+
+void ControlConnection::CmdPwd(string* args)
+{
+    if (args->length() == 0)
+    {
+        char* dirname = getcwd(NULL, 0);
+        if (dirname == NULL)
+        {
+            if (errno == ENOENT)
+            {
+                sendResponse(
+                    "550 Requested action not taken: "
+                    "directory does not exist");
+            }
+            else if (errno == ENAMETOOLONG)
+            {
+                sendResponse(
+                    "553 Requested directory action not taken: "
+                    "path is too long.");
+            }
+            else
+            {
+                sendResponse(
+                    "451 Requested action aborted: "
+                    "local error in processing.");
+            }
+            return;
+        }
+        char msg[1024];
+        snprintf(msg, 1024, "257 %s", dirname);
+        sendResponse(msg);
+        free(dirname);
+    }
+    else
+    {
+        sendResponse("501 Syntax error in parameters or arguments.");
     }
 }
 
