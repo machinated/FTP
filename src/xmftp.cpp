@@ -132,15 +132,6 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-    // char* endPointer;
-    // int port = strtol(argv[1], &endPointer, 10);
-    // if (*endPointer != '\0')    // non-digit characters in argument
-    // {
-    //     cerr << "Cannot interpret " << argv[1] << " as port number.\n";
-    //     cerr << helpMsg;
-    //     exit(1);
-    // }
-
     options.port = PORT_L;
     options.supressGA = true;
     options.local = false;
@@ -149,6 +140,26 @@ int main(int argc, char* argv[])
     {
         exit(1);
     }
+
+    // chroot jail
+    if (chdir("ftproot"))
+    {
+        cerr << "Failed to change to ftproot directory\n";
+        exit(1);
+    }
+
+    char* dirname = getcwd(NULL, 0);
+    if (dirname == NULL)
+    {
+        exit(1);
+    }
+    if (chroot(dirname))
+    {
+        cerr << "Failed to create chroot jail\n";
+        free(dirname);
+        exit(1);
+    }
+    free(dirname);
 
     try
     {
