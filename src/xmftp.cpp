@@ -142,24 +142,24 @@ int main(int argc, char* argv[])
     }
 
     // chroot jail
-    if (chdir("ftproot"))
-    {
-        cerr << "Failed to change to ftproot directory\n";
-        exit(1);
-    }
-
-    char* dirname = getcwd(NULL, 0);
-    if (dirname == NULL)
-    {
-        exit(1);
-    }
-    if (chroot(dirname))
-    {
-        cerr << "Failed to create chroot jail\n";
-        free(dirname);
-        exit(1);
-    }
-    free(dirname);
+    // if (chdir("ftproot"))
+    // {
+    //     cerr << "Failed to change to ftproot directory\n";
+    //     exit(1);
+    // }
+    //
+    // char* dirname = getcwd(NULL, 0);
+    // if (dirname == NULL)
+    // {
+    //     exit(1);
+    // }
+    // if (chroot(dirname))
+    // {
+    //     cerr << "Failed to create chroot jail\n";
+    //     free(dirname);
+    //     exit(1);
+    // }
+    // free(dirname);
 
     try
     {
