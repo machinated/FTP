@@ -905,15 +905,19 @@ void ControlConnection::CmdPasv(string *args)
             return;
         }
         uint32_t a = ntohl(addr.sin_addr.s_addr);
-        // uint16_t p = ntohs(addr.sin_port);
+        uint16_t p = ntohs(addr.sin_port);
         uint8_t a1, a2, a3, a4, p1, p2;
         a1 = a>>24;
         a2 = (a>>16) & 0xFF;
         a3 = (a>>8) & 0xFF;
         a4 = a & 0xFF;
 
-        p1 = (options.port-1)>>8;
-        p2 = (options.port-1) & 0xFF;
+        if (options.port == 2021)
+        {
+            p = 21;
+        }
+        p1 = p >>8;
+        p2 = p & 0xFF;
 
         char response[100];
         int formatResult = snprintf(response, 100,
