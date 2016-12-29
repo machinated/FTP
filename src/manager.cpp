@@ -105,7 +105,7 @@ void* runCC(void* cc_p)
 
 ControlConnection::ControlConnection(int socketDescriptor)
     : socket(socketDescriptor), telnet(socketDescriptor),
-      dataConnection(&telnet), user("")
+      dataConnection(&telnet), user(""), cwd("/")
 {
     pthread_mutex_lock(&listMutex);
     List.push_back(this);
@@ -300,6 +300,9 @@ void ControlConnection::CmdCwd(string* args)
         if (S_ISDIR(fstat.st_mode))
         {
             cwd = newpath + string("/");
+            #ifdef DEBUG
+                cout << "Changed working directory to " << cwd << "\n";
+            #endif
             char* dirname = getcwd(NULL, 0);
             if (dirname == NULL)
             {
