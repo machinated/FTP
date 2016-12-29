@@ -30,6 +30,8 @@ using namespace std;
 const char* helpMsg =
 "Usage: xmftp [OPTIONS]"                                                    "\n"
 "   -p PORT, --port         specify port number, default is 21"             "\n"
+"   -j DIR, --jail          use DIR as root directory"                      "\n"
+"   -u UNAME, --user        switch to user UNAME"                           "\n"
 "   -l, --local             accept only connections from localhost"         "\n"
 "   -g, --sendGA            send Go Ahead commands via Telnet, defult=no"   "\n"
 "   -r, --readonly          make all sessions read only"                    "\n"
@@ -210,7 +212,7 @@ int main(int argc, char* argv[])
         cerr << "Network error " << e.code() << e.what() << "\n";
         exit(1);
     }
-    cout << "Service started.\n";
+    cout << time(0) << " service started.\n";
 
     while(true)
     {

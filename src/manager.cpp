@@ -153,7 +153,7 @@ inline void ControlConnection::sendResponse(const char response[])
 {
     telnet.writeLine(response);
     #ifdef DEBUG
-        cout << peerAddrStr << " << " << response << '\n';
+        cout << time(0) << " " << peerAddrStr << " << " << response << '\n';
     #endif
 }
 
@@ -281,29 +281,56 @@ void ControlConnection::CmdUser(string* args)
 
 void ControlConnection::CmdCwd(string* args)
 {
-    int chdirResult = chdir(args->c_str());
-
-    if (chdirResult == 0)
+    string newpath;
+    if ((*args)[0] == '/')
     {
-        sendResponse("250 Requested file action okay, comleted.");
+        newpath = string(*args);
     }
     else
     {
-        if (errno == ENOTDIR)
+        newpath = cwd + *args;
+    }
+
+    int statResult;
+    struct stat fstat;
+    statResult = stat(newpath.c_str(), &fstat);
+
+    if (statResult == 0)
+    {
+        if (S_ISDIR(fstat.st_mode))
+        {
+            cwd = newpath + string("/");
+            char* dirname = getcwd(NULL, 0);
+            if (dirname == NULL)
+            {
+                exit(1);
+            }
+            sendResponse("250 Requested file action okay, comleted.");
+        }
+        else
         {
             sendResponse(
                 "550 Requested action not taken: "
                 "not a directory.");
         }
-        else if (errno == ENOENT)
+    }
+    else
+    {
+        if (errno == ENOENT || errno == ENOTDIR)
         {
             sendResponse(
                 "550 Requested action not taken: "
                 "directory does not exist.");
         }
+        else if (errno ==  ENAMETOOLONG)
+        {
+            sendResponse(
+                "550 Requested action not taken: "
+                "path name too long");
+        }
         else
         {
-            cerr << "Error changing to directory: " << *args << "\n";
+            cerr << "Error checking attributes fot direcory " << *args << "\n";
             sendResponse("451 Requested action aborted: "
                           "local error in processing.");
         }
@@ -516,13 +543,15 @@ void ControlConnection::CmdStru(string* args)
 
 void ControlConnection::CmdRetr(string* args)
 {
+    string fullname = cwd + *args;
+
     if (dataConnection.active)
     {
         sendResponse("400 Processing previous command");
         return;
     }
 
-    int fileDesc = open(args->c_str(), O_RDONLY);
+    int fileDesc = open(fullname.c_str(), O_RDONLY);
     if (fileDesc == -1)
     {
         if (errno == ENOENT)
@@ -553,6 +582,7 @@ void ControlConnection::CmdStor(string* args)
             "File name not allowed.");
         return;
     }
+    string fullname = cwd + *args;
 
     if (dataConnection.active)
     {
@@ -561,7 +591,7 @@ void ControlConnection::CmdStor(string* args)
     }
     // open file for writing, create it if it doesn't exist, truncate if it does
     // read and write permission for user, group and others
-    int fileDesc = open(args->c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    int fileDesc = open(fullname.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fileDesc == -1)
     {
         if (errno == ENOSPC || errno == EDQUOT)
@@ -619,7 +649,8 @@ void ControlConnection::CmdAbor(string* args)
 
 void ControlConnection::CmdDele(string* args)
 {
-    int unlinkResult = unlink(args->c_str());
+    string fullname = cwd + *args;
+    int unlinkResult = unlink(fullname.c_str());
 
     if (unlinkResult == 0)
     {
@@ -674,7 +705,8 @@ void ControlConnection::CmdNoop(string* args)
 
 void ControlConnection::CmdMkd(string* args)
 {
-    if (!checkName(args))
+    string fullname = cwd + *args;
+    if (!checkName(&fullname))
     {
         sendResponse(
             "553 Requested file action not taken. "
@@ -682,12 +714,12 @@ void ControlConnection::CmdMkd(string* args)
         return;
     }
 
-    int mkdirResult = mkdir(args->c_str(), 0777);
+    int mkdirResult = mkdir(fullname.c_str(), 0777);
 
     if (mkdirResult == 0)
     {
         char msg[1024];
-        snprintf(msg, 1024, "257 \"%s\" created.", args->c_str());
+        snprintf(msg, 1024, "257 \"%s\" created.", fullname.c_str());
         sendResponse(msg);
     }
     else
@@ -725,7 +757,8 @@ void ControlConnection::CmdMkd(string* args)
 
 void ControlConnection::CmdRmd(string* args)
 {
-    int rmdirResult = rmdir(args->c_str());
+    string fullname = cwd + *args;
+    int rmdirResult = rmdir(fullname.c_str());
 
     if (rmdirResult == 0)
     {
@@ -774,35 +807,11 @@ void ControlConnection::CmdRmd(string* args)
 
 void ControlConnection::CmdPwd(string* args)
 {
+
     if (args->length() == 0)
     {
-        char* dirname = getcwd(NULL, 0);
-        if (dirname == NULL)
-        {
-            if (errno == ENOENT)
-            {
-                sendResponse(
-                    "550 Requested action not taken: "
-                    "directory does not exist");
-            }
-            else if (errno == ENAMETOOLONG)
-            {
-                sendResponse(
-                    "553 Requested directory action not taken: "
-                    "path is too long.");
-            }
-            else
-            {
-                sendResponse(
-                    "451 Requested action aborted: "
-                    "local error in processing.");
-            }
-            return;
-        }
-        char msg[1024];
-        snprintf(msg, 1024, "257 %s", dirname);
-        sendResponse(msg);
-        free(dirname);
+        string response = string("257 ") + cwd;
+        sendResponse(response.c_str());
     }
     else
     {
@@ -812,9 +821,10 @@ void ControlConnection::CmdPwd(string* args)
 
 void ControlConnection::CmdNlst(string* args)
 {
+    string fullname = cwd + *args;
     DIR* dirStream;
 
-    if (args->length() == 0)
+    if (fullname.length() == 0)
     {
         char* dirname = getcwd(NULL, 0);
         if (dirname == NULL)
@@ -829,10 +839,8 @@ void ControlConnection::CmdNlst(string* args)
     }
     else
     {
-        dirStream = opendir(args->c_str());
+        dirStream = opendir(fullname.c_str());
     }
-
-
 
     if (dirStream == NULL)
     {

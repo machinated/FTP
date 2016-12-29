@@ -124,7 +124,7 @@ void DataConnection::sendResponse(const char response[])
 {
     telnet->writeLine(response);
     #ifdef DEBUG
-        cout << response << '\n';
+        cout << time(0) << " " << response << '\n';
     #endif
 }
 
@@ -205,13 +205,21 @@ void DataConnection::Connect()
 void DataConnection::Close()
 {
     assert(isConnected());
-    close(connDesc);
+    if (close(connDesc))
+    {
+        cerr << "Error closing connection\n";
+        exit(1);
+    }
     connDesc = 0;
 
     if (settings.passive)
     {
         assert(serverSocket > 0);
-        close(serverSocket);
+        if (close(serverSocket))
+        {
+            cerr << "Error closing socket\n";
+            exit(1);
+        }
         serverSocket = 0;
     }
 }
@@ -525,6 +533,10 @@ void DataConnection::Nlist()
         }
     }
     Close();
-    closedir(dirDesc);
+    if (closedir(dirDesc))
+    {
+        cerr << "Error closing directory\n";
+        exit(1);
+    }
     active = false;
 }

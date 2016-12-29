@@ -17,6 +17,7 @@ class ControlConnection
     dataConnSettings settings;
     std::string peerAddrStr;
     std::string user;
+    std::string cwd;
     bool run;
 public:
     pthread_t thread;
