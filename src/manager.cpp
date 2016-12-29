@@ -282,7 +282,11 @@ void ControlConnection::CmdUser(string* args)
 void ControlConnection::CmdCwd(string* args)
 {
     string newpath;
-    if ((*args)[0] == '/')
+    if ((*args).length() == 0)
+    {
+        newpath = string("/");
+    }
+    else if ((*args)[0] == '/')
     {
         newpath = string(*args);
     }
