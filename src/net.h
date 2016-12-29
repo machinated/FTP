@@ -15,6 +15,9 @@ int openServerSocket(int port);
 struct options_t
 {
     unsigned int port;
+    char* jaildir;
+    char* username;
+    uid_t userid;
     bool supressGA;
     bool local;
 };

@@ -13,6 +13,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <getopt.h>
+#include <pwd.h>
 #include <string>
 #include <iostream>
 
@@ -63,6 +64,8 @@ int parseOptions(int argc, char *argv[])
     static struct option long_options[] =
     {
         {"port",        required_argument,  0, 'p'},
+        {"jail",        required_argument,  0, 'j'},
+        {"user",        required_argument,  0, 'u'},
         {"local",       no_argument,        0, 'l'},
         {"sendga",      no_argument,        0, 'g'},
         {"readonly",    no_argument,        0, 'r'},
@@ -74,7 +77,7 @@ int parseOptions(int argc, char *argv[])
     while (1)
     {
         int option_index;
-        c = getopt_long(argc, argv, "p:lgrh", long_options, &option_index);
+        c = getopt_long(argc, argv, "p:j:u:lgrh", long_options, &option_index);
         if (c == -1)
             break;
 
@@ -89,6 +92,15 @@ int parseOptions(int argc, char *argv[])
                 cerr << "Invalid port: " << optarg << "\n";
             break;
         }
+        case 'j':
+            options.jaildir = (char*) malloc(strlen(optarg) + 1);
+            strcpy(options.jaildir, optarg);
+            break;
+
+        case 'u':
+            options.username = (char*) malloc(strlen(optarg) + 1);
+            strcpy(options.username, optarg);
+            break;
 
         case 'l':
             options.local = true;
@@ -135,31 +147,59 @@ int main(int argc, char* argv[])
     options.port = PORT_L;
     options.supressGA = true;
     options.local = false;
+    options.jaildir = NULL;
+    options.username = NULL;
+    options.userid = 0;
 
     if (parseOptions(argc, argv))
     {
         exit(1);
     }
 
+    if (options.username != NULL)
+    {
+        struct passwd* passwd = getpwnam(options.username);
+        if (passwd == NULL)
+        {
+            cerr << "Cannot find user " << options.username << "\n";
+            exit(1);
+        }
+        options.userid = passwd->pw_uid;
+        free(options.username);
+    }
+
     // chroot jail
-    // if (chdir("ftproot"))
-    // {
-    //     cerr << "Failed to change to ftproot directory\n";
-    //     exit(1);
-    // }
-    //
-    // char* dirname = getcwd(NULL, 0);
-    // if (dirname == NULL)
-    // {
-    //     exit(1);
-    // }
-    // if (chroot(dirname))
-    // {
-    //     cerr << "Failed to create chroot jail\n";
-    //     free(dirname);
-    //     exit(1);
-    // }
-    // free(dirname);
+    if (options.jaildir != NULL)
+    {
+
+        if (chdir(options.jaildir))
+        {
+            cerr << "Failed to change to directory: " << options.jaildir << "\n";
+            exit(1);
+        }
+
+        char* dirname = getcwd(NULL, 0);
+        if (dirname == NULL)
+        {
+            exit(1);
+        }
+        if (chroot(dirname))
+        {
+            cerr << "Failed to create chroot jail\n";
+            free(dirname);
+            exit(1);
+        }
+        free(dirname);
+        free(options.jaildir);
+    }
+
+    if (options.userid != 0)
+    {
+        if(setuid(options.userid))
+        {
+            cerr << "Failed to switch to user " << options.userid << "\n";
+        }
+    }
 
     try
     {
