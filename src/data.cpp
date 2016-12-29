@@ -151,7 +151,8 @@ void DataConnection::Connect()
 
     if (settings.passive)    // wait for connection
     {
-        Open();
+        if (serverSocket == 0)
+            Open();
         connDesc = accept(serverSocket, NULL, NULL);
         if (connDesc < 0)
         {

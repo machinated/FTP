@@ -23,6 +23,7 @@ struct options_t
 };
 
 extern struct options_t options;
+extern struct sockaddr_in ipaddr;
 
 class MutexPipe
 {

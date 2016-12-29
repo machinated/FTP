@@ -904,7 +904,7 @@ void ControlConnection::CmdPasv(string *args)
                           "local error in processing.");
             return;
         }
-        uint32_t a = ntohl(addr.sin_addr.s_addr);
+        uint32_t a = ntohl(ipaddr.sin_addr.s_addr);
         uint16_t p = ntohs(addr.sin_port);
         uint8_t a1, a2, a3, a4, p1, p2;
         a1 = a>>24;
@@ -914,7 +914,7 @@ void ControlConnection::CmdPasv(string *args)
 
         if (options.port == 2021)
         {
-            p = 21;
+            p = PORT_L-1;
         }
         p1 = p >>8;
         p2 = p & 0xFF;

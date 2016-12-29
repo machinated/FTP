@@ -1,8 +1,10 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <net/if.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <signal.h>
@@ -14,6 +16,7 @@
 #include <signal.h>
 #include <getopt.h>
 #include <pwd.h>
+#include <ifaddrs.h>
 #include <string>
 #include <iostream>
 
@@ -24,6 +27,7 @@
 #define QUEUE_SIZE 5
 int serverSocket = -1;
 struct options_t options;
+struct sockaddr_in ipaddr;
 
 using namespace std;
 
@@ -202,6 +206,27 @@ int main(int argc, char* argv[])
             cerr << "Failed to switch to user " << options.userid << "\n";
         }
     }
+
+    struct ifaddrs* iflist;
+    if (getifaddrs(&iflist))
+    {
+        cerr << "Error checking network interfaces\n";
+        exit(1);
+    }
+
+    for (struct ifaddrs* iter = iflist; iter != NULL; iter = iter->ifa_next)
+    {
+        if (iter->ifa_addr->sa_family==AF_INET &&
+            !(iter->ifa_flags & IFF_LOOPBACK))
+        {
+            cout << "Using interface " << iter->ifa_name << "\n";
+            cout << "IP address: " << ipaddr.sin_addr.s_addr << "\n";
+            memcpy(&ipaddr, (struct sockaddr_in*) iter->ifa_addr,
+                sizeof(sockaddr_in));
+            break;
+        }
+    }
+    freeifaddrs(iflist);
 
     try
     {
