@@ -24,9 +24,9 @@ RLINK_FLAGS =
 # Additional debug-specific linker settings
 DLINK_FLAGS =
 # Destination directory, like a jail or mounted system
-DESTDIR = /
+DESTDIR = /ftp
 # Install path (bin/ is appended automatically)
-INSTALL_PREFIX = usr/local
+INSTALL_PREFIX =
 #### END PROJECT SETTINGS ####
 
 # Generally should not need to edit below this line
