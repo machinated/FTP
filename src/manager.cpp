@@ -912,8 +912,8 @@ void ControlConnection::CmdPasv(string *args)
         a3 = (a>>8) & 0xFF;
         a4 = a & 0xFF;
 
-        p1 = (options.port)>>8;
-        p2 = (options.port) & 0xFF;
+        p1 = (options.port-1)>>8;
+        p2 = (options.port-1) & 0xFF;
 
         char response[100];
         int formatResult = snprintf(response, 100,
