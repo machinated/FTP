@@ -31,12 +31,12 @@ enum Commands
     LIST, NLST, SITE, SYST, STAT, HELP, NOOP
 };
 
-#define NCOMMANDS 33
+#define NCOMMANDS 37
 const char* CommandStrings[] = {
     "USER", "PASS", "ACCT", "CWD", "CDUP", "SMNT", "QUIT", "REIN", "PORT",
     "PASV", "TYPE", "STRU", "MODE", "RETR", "STOR", "STOU", "APPE", "ALLO",
     "REST", "RNFR", "RNTO", "ABOR", "DELE", "RMD", "MKD", "PWD", "LIST", "NLST",
-    "SITE", "SYST", "STAT", "HELP", "NOOP"
+    "SITE", "SYST", "STAT", "HELP", "NOOP", "FEAT", "SIZE, ""MLST", "MLSD"
 };
 
 typedef struct Command
@@ -873,6 +873,13 @@ void ControlConnection::CmdNlst(string* args)
     }
 
     dataConnection.ThreadNlist(dirStream);
+}
+
+void ControlConnection::CmdMlst(string* args)
+{
+    string fullname = cwd + *args;
+    sendResponse("250-Listing entity");
+    sendResponse("250 End")
 }
 
 void ControlConnection::CmdPasv(string *args)

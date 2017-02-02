@@ -220,7 +220,6 @@ int main(int argc, char* argv[])
             !(iter->ifa_flags & IFF_LOOPBACK))
         {
             cout << "Using interface " << iter->ifa_name << "\n";
-            cout << "IP address: " << ipaddr.sin_addr.s_addr << "\n";
             memcpy(&ipaddr, (struct sockaddr_in*) iter->ifa_addr,
                 sizeof(sockaddr_in));
             break;

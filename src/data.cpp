@@ -246,9 +246,23 @@ void DataConnection::SetDir(DIR* dDesc)
 
 DataConnection::~DataConnection()
 {
-    close(connDesc);
-    if (settings.passive)
-        close(serverSocket);
+    Abort();
+    if (thread != pthread_self())
+    {
+        struct timespec timeout;
+        timeout.tv_sec = (time_t) 0;
+        timeout.tv_nsec = (long) 1e6;
+        int joinResult = pthread_timedjoin_np(thread, nullptr, &timeout);
+        if (joinResult)
+        {
+            cerr << "Error joining data connection thread.\n";
+            pthread_cancel(thread);
+        }
+    }
+    if (isConnected())
+    {
+        Close();
+    }
 }
 
 void DataConnection::Abort()
