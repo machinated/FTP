@@ -45,7 +45,6 @@ public:
     void CmdRmd(std::string* args);
     void CmdPwd(std::string* args);
     void CmdNlst(std::string* args);
-    void CmdMlst(std::string* args);
     void CmdNoop(std::string* args);
     void CmdNotImplemented(std::string* args);
 
