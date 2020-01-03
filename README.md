@@ -1,12 +1,12 @@
-#Autor
+# Autor
 Michał Cieśnik
 
 Projekt na laboratorium Sieci Komputerowe 2.
 
-#Wymagania
+# Wymagania
 g++ >= 5.0
 
-#Kompilacja
+# Kompilacja
 ```
 make release
 ```
@@ -15,7 +15,7 @@ Wersja z opcją debugowania, wyświetlająca więcej komunikatów:
 make debug
 ```
 
-#Użytkowanie
+# Użytkowanie
 Wyświetlenie możliwych opcji:
 ```
 xmftp -h
@@ -26,5 +26,5 @@ mkdir ftproot
 sudo xmftp -j ftproot
 ```
 
-#Użyty kod
+# Użyty kod
 [GenericMakefile](https://github.com/mbcrawfo/GenericMakefile) - Michael Crawford
